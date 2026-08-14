@@ -1,0 +1,93 @@
+# 单 Pika 遥操单 Piper follower（末端位姿/MOVE P）。
+# 首次上真机务必先将 move_speed_percent 和启动预定位限幅保持在较小值。
+# 顶层 fps 是向机器人下发动作的控制循环频率；不是相机、Pika 轮询或录制帧率。
+fps: 50
+
+robot:
+  # type 选择 Piper follower 驱动；id 是逻辑名称；port 是 SocketCAN 接口名。
+  type: lerobot_real::piper
+  id: piper_follower
+  port: can0
+  # cartesian 接收 pose.xyz(mm) + pose.rxyz(轴角 rad) + gripper.pos([0, 1])。
+  # 这里直接使用固件 EndPoseCtrl，不包含 MoveIt 或本项目实现的 IK。
+  control_space: cartesian
+  # 连接时设为 follower(0xFC) 并使能；park=true 会触发实际机械臂运动。
+  configure_role_on_connect: true
+  park_on_connect: false
+  park_on_disconnect: false
+  # 未支撑时失能会导致机械臂跌落；退出程序后保持电机使能。
+  disable_torque_on_disconnect: false
+  # 保持使能退出时，先命令机械臂保持当前反馈位姿，避免追赶最后一个遥操目标。
+  hold_position_on_disconnect: true
+  # 反馈超过 timeout 未更新即拒绝动作；startup 是连接时等待有效反馈的总时限。
+  feedback_timeout_s: 0.5
+  feedback_startup_timeout_s: 5.0
+  # direct: 每周期直发完整 EEF 目标，响应更直接；step: 每周期按下方步长追赶。
+  # 即使选择 direct，启动移动到 robot_base_pose 时仍会强制使用 step 限步。
+  cartesian_command_mode: direct
+  # direct 模式安全阈值：目标与当前反馈的平移/旋转差超过阈值就拒绝发送。
+  # 它们不是每周期速度限制；阈值越大越跟手，但异常目标的保护越弱。
+  max_cartesian_following_error_mm: 600.0
+  # step 模式的单周期平移(mm)/旋转(rad)上限；本 direct 示例仅启动预定位使用。
+  max_cartesian_step_mm: 3.0
+  max_rotation_step_rad: 0.02
+  # direct 模式旋转跟随误差阈值(rad)，与上方平移阈值配套。
+  max_rotation_following_error_rad: 3.2
+  # Piper 基座坐标系下的 EEF 工作空间 [min, max]，单位 mm；目标先裁剪到该范围。
+  # 若机械臂当前反馈已在范围外，驱动会拒绝继续发送笛卡尔动作。
+  workspace_x: [50, 600]
+  workspace_y: [-500, 500]
+  workspace_z: [50, 600]
+  # move_p: 固件点到点末端跟随，适合持续更新目标，但 TCP 路径不保证直线。
+  # 可改 move_l 使用固件直线轨迹，更适合稳定线段，不适合快速变化的遥操目标。
+  # 两者都走 EndPoseCtrl 常规模式(第四字节 0x00)；0xAD 仅属于关节/MIT，不用于 EEF。
+  move_mode: move_p
+  # SDK 速度百分比 [1, 100]，不是 Hz；此示例 30 覆盖了代码默认值 5。
+  move_speed_percent: 30
+  # 夹爪 SDK 力矩参数，范围 [0, 5000]；首次联调不要盲目调高。
+  gripper_effort: 1000
+  # wrist 是 observation 图像键；相机 fps 与机械臂顶层 fps 相互独立。
+  cameras:
+    wrist:
+      type: opencv
+      index_or_path: /dev/v4l/by-id/usb-DECXIN_CAMERA_DECXIN_CAMERA_01.00.00-video-index0
+      width: 640
+      height: 480
+      fps: 30
+      fourcc: MJPG
+
+teleop:
+  # Pika 遥操作器；port 建议填写稳定的 /dev/serial/by-id 路径。
+  type: lerobot_real::pika_teleop
+  id: pika
+  port: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+  # Pika 命令状态/启动手势后台轮询频率(Hz)，不决定机械臂动作发送频率。
+  frequency: 100
+  # true 输出 gripper.pos；scale_xyz 只缩放 Pika 平移增量，不缩放旋转。
+  use_gripper: true
+  scale_xyz: 1.0
+  # gripper_gesture 需要先闭合到 close 阈值，再张开到 open 阈值才激活遥操。
+  # 也可设 command，改用 Pika 命令状态切换启停；阈值范围为 0..100 mm。
+  activation_mode: gripper_gesture
+  activation_close_threshold_mm: 15
+  activation_open_threshold_mm: 70
+  # robot_base 将 Pika 世界运动映射到 Piper 基座；official 则使用激活时的局部工具轴。
+  control_frame: robot_base
+  # Pika 跟踪世界到 Piper 基座的固定旋转 [roll, pitch, yaw]，单位度，仅 robot_base 使用。
+  tracker_world_to_robot_base_rpy: [0, 0, 0]
+
+  # 工具标定 [x,y,z(mm), roll,pitch,yaw(deg)]；Piper-X 190 mm TCP 变换的逆。
+  tracker_to_robot_eef: [-190, 0, 0, -90, 0, -90]
+  # 激活前的 Piper J6 起始位姿 [x,y,z(mm), roll,pitch,yaw(deg)]，必须位于工作空间内。
+  robot_base_pose: [209.336, -2.972, 262.126, -145.664, -6.820, -91.377]
+
+dataset:
+  # root/repo_id 决定保存位置与标识；dataset.fps 只控制录制帧率。
+  root: ./data/pika_piper
+  repo_id: local/pika_piper
+  single_task: Teleoperate the Piper arm with Pika
+  fps: 30
+  episode_time_s: 60
+  reset_time_s: 20
+  num_episodes: 50
+  push_to_hub: false

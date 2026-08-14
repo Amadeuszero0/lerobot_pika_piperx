@@ -1,0 +1,148 @@
+# 方案二：两套 Pika 分别遥操两台 Piper follower（末端位姿/MOVE P）。
+# 首次上真机务必先将 move_speed_percent 和单周期限幅保持在较小值。
+# 顶层 fps 是双臂动作下发频率；Pika frequency、相机 fps、dataset.fps 各自独立。
+fps: 50
+
+robot:
+  type: lerobot_real::dual_piper
+  id: dual_piper
+  # true 并行连接两台 Piper；false 可用于逐臂排查连接和反馈问题。
+  parallel_connect: true
+  # 并行读取双臂反馈/相机，减少左右观测的时间差。
+  parallel_observation: true
+  # 并行下发左右臂动作，避免串行发送造成固定侧间延迟。
+  parallel_action: true
+  # left/right 会成为动作、状态和相机键前缀；两侧 CAN 接口必须不同。
+  robots:
+    left:
+      # type 为 follower 驱动，id 为该侧逻辑名称，port 为独立 SocketCAN 接口。
+      type: lerobot_real::piper
+      id: left_piper
+      port: can_follower1
+      # cartesian 接收 xyz(mm)+轴角(rad)+夹爪([0,1])，由 Piper 固件 EndPoseCtrl 执行。
+      # 本项目没有在此路径中实现外部 IK。
+      control_space: cartesian
+      # 连接时设 follower(0xFC) 并使能；park 会引发运动；退出失能时注意坠臂风险。
+      configure_role_on_connect: true
+      park_on_connect: false
+      park_on_disconnect: false
+      disable_torque_on_disconnect: true
+      # timeout 是反馈最大陈旧时间；startup 是连接时等待首批有效反馈的总时限。
+      feedback_timeout_s: 0.5
+      feedback_startup_timeout_s: 5.0
+      # 未显式配置 cartesian_command_mode 时默认为 step，以下两项每周期都生效。
+      # 平移单位 mm、旋转单位 rad；数值越小越平滑但跟随滞后越明显。
+      max_cartesian_step_mm: 1.0
+      max_rotation_step_rad: 0.01
+      # Piper 基座坐标系工作空间 [min,max]，单位 mm；目标会裁剪，当前位置越界则拒发。
+      workspace_x: [100, 600]
+      workspace_y: [-500, 500]
+      workspace_z: [50, 600]
+      # move_p 适合连续遥操目标但不保证 TCP 直线；move_l 用于稳定的直线段。
+      # 两者均为 EndPoseCtrl 常规模式(第四字节 0x00)，不能改成关节/MIT 的 0xAD。
+      move_mode: move_p
+      # SDK 速度百分比 [1,100]，不是 Hz；与单周期限幅共同决定实际跟随感受。
+      move_speed_percent: 5
+      # 夹爪 SDK 力矩参数 [0,5000]；首次真机测试不要盲目调高。
+      gripper_effort: 1000
+      # wrist 会形成 left.wrist/right.wrist 图像观测；两侧路径必须分别替换。
+      cameras:
+        wrist:
+          type: opencv
+          index_or_path: /dev/v4l/by-id/REPLACE_LEFT_CAMERA
+          width: 640
+          height: 480
+          fps: 30
+          fourcc: MJPG
+    right:
+      # type 为 follower 驱动，id 为该侧逻辑名称，port 为独立 SocketCAN 接口。
+      type: lerobot_real::piper
+      id: right_piper
+      port: can_follower2
+      # cartesian 接收 xyz(mm)+轴角(rad)+夹爪([0,1])，由 Piper 固件 EndPoseCtrl 执行。
+      # 本项目没有在此路径中实现外部 IK。
+      control_space: cartesian
+      # 连接时设 follower(0xFC) 并使能；park 会引发运动；退出失能时注意坠臂风险。
+      configure_role_on_connect: true
+      park_on_connect: false
+      park_on_disconnect: false
+      disable_torque_on_disconnect: true
+      # timeout 是反馈最大陈旧时间；startup 是连接时等待首批有效反馈的总时限。
+      feedback_timeout_s: 0.5
+      feedback_startup_timeout_s: 5.0
+      # 未显式配置 cartesian_command_mode 时默认为 step，以下两项每周期都生效。
+      # 平移单位 mm、旋转单位 rad；数值越小越平滑但跟随滞后越明显。
+      max_cartesian_step_mm: 1.0
+      max_rotation_step_rad: 0.01
+      # Piper 基座坐标系工作空间 [min,max]，单位 mm；目标会裁剪，当前位置越界则拒发。
+      workspace_x: [100, 600]
+      workspace_y: [-500, 500]
+      workspace_z: [50, 600]
+      # move_p 适合连续遥操目标但不保证 TCP 直线；move_l 用于稳定的直线段。
+      # 两者均为 EndPoseCtrl 常规模式(第四字节 0x00)，不能改成关节/MIT 的 0xAD。
+      move_mode: move_p
+      # SDK 速度百分比 [1,100]，不是 Hz；与单周期限幅共同决定实际跟随感受。
+      move_speed_percent: 5
+      # 夹爪 SDK 力矩参数 [0,5000]；首次真机测试不要盲目调高。
+      gripper_effort: 1000
+      # wrist 会形成 left.wrist/right.wrist 图像观测；两侧路径必须分别替换。
+      cameras:
+        wrist:
+          type: opencv
+          index_or_path: /dev/v4l/by-id/REPLACE_RIGHT_CAMERA
+          width: 640
+          height: 480
+          fps: 30
+          fourcc: MJPG
+
+teleop:
+  type: lerobot_real::dual_pika_teleop
+  id: dual_pika
+  # true 并行读取两套 Pika，减少左右动作采样时间差。
+  parallel_read: true
+  # left/right 必须与 robot 子项同名；未写 activation_mode/control_frame 时
+  # 分别默认 command（命令状态启停）和 official（激活时局部工具轴）。
+  teleops:
+    left:
+      # id 为逻辑名称；port 替换为该侧 Pika 的稳定串口路径。
+      type: lerobot_real::pika_teleop
+      id: left_pika
+      port: /dev/REPLACE_LEFT_PIKA
+      # Use the persistent LHR hardware serial; T20/T21 can swap on restart.
+      tracker_device_id: REPLACE_LEFT_TRACKER_LHR
+      # Pika 命令状态后台轮询频率(Hz)，不是 Piper 动作发送频率。
+      frequency: 100
+      # true 输出夹爪动作；scale_xyz 只缩放平移增量，不缩放旋转。
+      use_gripper: true
+      scale_xyz: 1.0
+      # 工具标定 [xyz(mm), rpy(deg)]；Piper-X 190 mm TCP 变换的逆。
+      tracker_to_robot_eef: [-190, 0, 0, -90, 0, -90]
+      # 该侧 Piper J6 起始位姿 [xyz(mm), rpy(deg)]，必须处于对应工作空间内。
+      robot_base_pose: [300, 150, 250, 180, 0, 0]
+    right:
+      # id 为逻辑名称；port 替换为该侧 Pika 的稳定串口路径。
+      type: lerobot_real::pika_teleop
+      id: right_pika
+      port: /dev/REPLACE_RIGHT_PIKA
+      # Both sides share one libsurvive context and must select distinct trackers.
+      tracker_device_id: REPLACE_RIGHT_TRACKER_LHR
+      # Pika 命令状态后台轮询频率(Hz)，不是 Piper 动作发送频率。
+      frequency: 100
+      # true 输出夹爪动作；scale_xyz 只缩放平移增量，不缩放旋转。
+      use_gripper: true
+      scale_xyz: 1.0
+      # 工具标定 [xyz(mm), rpy(deg)]；Piper-X 190 mm TCP 变换的逆。
+      tracker_to_robot_eef: [-190, 0, 0, -90, 0, -90]
+      # 该侧 Piper J6 起始位姿 [xyz(mm), rpy(deg)]，必须处于对应工作空间内。
+      robot_base_pose: [300, -150, 250, 180, 0, 0]
+
+dataset:
+  # root/repo_id 决定保存位置与标识；dataset.fps 只控制录制帧率。
+  root: ./data/dual_pika_piper
+  repo_id: local/dual_pika_piper
+  single_task: REPLACE_TASK_DESCRIPTION
+  fps: 30
+  episode_time_s: 60
+  reset_time_s: 20
+  num_episodes: 50
+  push_to_hub: false

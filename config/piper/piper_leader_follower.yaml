@@ -1,0 +1,55 @@
+# 单 Piper leader 遥操单 Piper follower（关节主从）。
+# 需要两路不同的 CAN 口；动作空间为归一化关节位置。
+robot:
+  # type 选择 Piper follower 驱动；id 是日志中的逻辑名称；port 是 SocketCAN 接口名。
+  type: lerobot_real::piper
+  id: piper_follower
+  port: can_follower
+  # joint 输出 joint1..6=[-100, 100]、gripper=[0, 100]；这里不是 EEF/笛卡尔控制。
+  # 当前关节驱动使用 JointCtrl 常规位置模式，YAML 不提供 0xAD/MIT 开关。
+  control_space: joint
+  # 连接/退出策略：连接时设为 follower(0xFC)；park 会触发实际机械臂运动。
+  configure_role_on_connect: true
+  park_on_connect: false
+  park_on_disconnect: false
+  # true 会在退出时失能；机械臂和负载必须先得到可靠支撑。
+  disable_torque_on_disconnect: true
+  # 运行反馈超过 feedback_timeout_s 未更新即拒绝动作；startup 是首次等待总时限。
+  feedback_timeout_s: 0.5
+  feedback_startup_timeout_s: 5.0
+  # 每周期关节目标变化上限，单位是归一化值，不是度/弧度；null 会关闭限幅。
+  max_relative_target: 0.5
+  # SDK 速度百分比 [1, 100]，不是控制频率；真机首调建议保持低值。
+  move_speed_percent: 5
+  # 相机键名 wrist 会成为 observation 字段；优先使用稳定的 /dev/v4l/by-id 路径。
+  cameras:
+    wrist:
+      type: opencv
+      index_or_path: /dev/v4l/by-id/REPLACE_CAMERA
+      width: 640
+      height: 480
+      fps: 30
+      fourcc: MJPG
+
+teleop:
+  # leader 使用独立 CAN；连接时设为示教输入臂(0xFA)，不会按 follower 使能。
+  type: lerobot_real::piper_leader
+  id: piper_leader
+  port: can_leader
+  configure_role_on_connect: true
+  # true 会在退出时失能；机械臂和负载必须先得到可靠支撑。
+  disable_torque_on_disconnect: true
+  # 运行反馈超过 feedback_timeout_s 未更新即拒绝动作；startup 是首次等待总时限。
+  feedback_timeout_s: 0.5
+  feedback_startup_timeout_s: 5.0
+
+dataset:
+  # root/repo_id 决定数据保存位置与标识；dataset.fps 只控制录制帧率。
+  root: ./data/piper_leader_follower
+  repo_id: local/piper_leader_follower
+  single_task: REPLACE_TASK_DESCRIPTION
+  fps: 30
+  episode_time_s: 60
+  reset_time_s: 20
+  num_episodes: 50
+  push_to_hub: false

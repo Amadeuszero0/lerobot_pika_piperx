@@ -1,0 +1,113 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel>=0.42"]
+build-backend = "setuptools.build_meta"
+
+# Modified for Lerobot-Real; based on the UFACTORY LeRobot project.
+[project]
+name = "lerobot-real"
+version = "0.1.0"
+description = "面向多种真实机械臂平台的 LeRobot 集成"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Lerobot-Real Contributors" },
+]
+keywords = ["robotics", "lerobot", "multi-robot", "ufactory", "xarm", "piper", "imitation-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pyyaml",
+    "lerobot==0.4.3",
+    "xarm-python-sdk",
+    "opencv-python",
+]
+
+[project.urls]
+Repository = "https://github.com/jianliuuu/Lerobot-Real"
+"Original Project" = "https://github.com/xArm-Developer/lerobot_robot_ufactory"
+
+[project.scripts]
+lerobot-real-teleop = "lerobot_real.scripts.robot_teleop:main"
+lerobot-real-record = "lerobot_real.scripts.lerobot_record:main"
+lerobot-real-eval = "lerobot_real.scripts.lerobot_eval:main"
+lerobot-real-vive-calibrate = "lerobot_real.scripts.vive_calibrate:main"
+lerobot-real-camera-view = "lerobot_real.scripts.camera_view:main"
+lerobot-real-piper-check-config = "lerobot_real.scripts.piper_check_config:main"
+lerobot-real-policy-server = "lerobot_real.deployment.server_policy:main"
+lerobot-real-deploy-piper = "lerobot_real.deployment.client_piper:main"
+
+[project.optional-dependencies]
+# GELLO 遥操作
+gello = [
+    "gello @ git+https://github.com/xArm-Developer/gello_software.git",
+    "dynamixel-sdk @ git+https://github.com/ROBOTIS-GIT/DynamixelSDK.git#subdirectory=python",
+]
+# SpaceMouse 遥操作
+spacemouse = [
+    "spnav @ git+https://github.com/kazoo-osaro/spnav",
+]
+# AgileX Piper
+piper = [
+    "piper_sdk>=0.3.0",
+    "python-can>=3.3.4",
+]
+# 远程真机策略部署
+deployment = [
+    "msgpack>=1.0.8",
+    "websockets>=15.0,<17",
+]
+# 开发工具
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"lerobot_real.devices.umi.xvlib" = ["*.so", "*.so.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true

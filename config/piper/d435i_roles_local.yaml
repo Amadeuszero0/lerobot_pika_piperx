@@ -1,0 +1,14 @@
+version: 1
+
+# Bind camera roles to immutable RealSense serial numbers.  Never bind roles
+# to /dev/videoN or a USB bus/port because those names can change after reboot.
+camera:
+  width: 640
+  height: 480
+  fps: 30
+  require_usb3: true
+
+roles:
+  third_view: "346122070530"
+  left_wrist: "233522077815"
+  right_wrist: "250122077305"

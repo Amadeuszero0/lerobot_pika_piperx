@@ -1,0 +1,93 @@
+# 方案一：两套 Pika 直接采集（不驱动机械臂）。
+# 运行前替换两个串口、相机路径、dataset.root/repo_id/task。
+# mock_robot 只把 Pika 动作和相机写入数据，不存在 move_mode、速度、限幅或 0xAD。
+robot:
+  type: lerobot_real::multiple_mock_robot
+  id: dual_pika_sensor_robot
+  # left/right 会成为动作、状态和相机键前缀。
+  robots:
+    left:
+      # mock_robot 不连接真实机械臂；id 是逻辑名称，teleop_id 用于关联同名 Pika。
+      type: lerobot_real::mock_robot
+      id: left_pika_sensor
+      teleop_id: left_pika
+      # 记录 pose.xyz(mm)+pose.rxyz(轴角 rad)；gripper_type>0 时同时记录 gripper.pos。
+      control_space: cartesian
+      gripper_type: 1
+      # wrist 会形成 left.wrist/right.wrist 图像观测；两侧相机路径必须分别替换。
+      cameras:
+        wrist:
+          type: opencv
+          index_or_path: /dev/v4l/by-id/REPLACE_LEFT_CAMERA
+          width: 640
+          height: 480
+          fps: 30
+          fourcc: MJPG
+    right:
+      # mock_robot 不连接真实机械臂；id 是逻辑名称，teleop_id 用于关联同名 Pika。
+      type: lerobot_real::mock_robot
+      id: right_pika_sensor
+      teleop_id: right_pika
+      # 记录 pose.xyz(mm)+pose.rxyz(轴角 rad)；gripper_type>0 时同时记录 gripper.pos。
+      control_space: cartesian
+      gripper_type: 1
+      # wrist 会形成 left.wrist/right.wrist 图像观测；两侧相机路径必须分别替换。
+      cameras:
+        wrist:
+          type: opencv
+          index_or_path: /dev/v4l/by-id/REPLACE_RIGHT_CAMERA
+          width: 640
+          height: 480
+          fps: 30
+          fourcc: MJPG
+
+teleop:
+  type: lerobot_real::dual_pika_teleop
+  id: dual_pika
+  # true 并行读取两套 Pika，减少左右动作采样时间差。
+  parallel_read: true
+  # left/right 必须与上方 mock robot 子项同名，teleop_id 才能正确找到数据源。
+  teleops:
+    left:
+      # id 与对应 mock robot 的 teleop_id 一致；port 替换为稳定串口路径。
+      type: lerobot_real::pika_teleop
+      id: left_pika
+      port: /dev/REPLACE_LEFT_PIKA
+      # Use the persistent LHR hardware serial; T20/T21 can swap on restart.
+      tracker_device_id: REPLACE_LEFT_TRACKER_LHR
+      # Pika 命令状态后台轮询频率(Hz)，不等于 dataset.fps。
+      frequency: 100
+      # true 输出夹爪动作；scale_xyz 只缩放平移增量，不缩放旋转。
+      use_gripper: true
+      scale_xyz: 1.0
+      # 旧版字段；当前 PikaTeleop 实际读取 tracker_to_robot_eef，而不读取本字段。
+      robot_control_to_pika_tcp: [0, 0, 190, 0, -90, 0]
+      # Pika 输出位姿的初始参考 [xyz(mm), rpy(deg)]；mock 模式不会据此移动真机。
+      robot_base_pose: [300, 150, 250, 180, 0, 0]
+    right:
+      # id 与对应 mock robot 的 teleop_id 一致；port 替换为稳定串口路径。
+      type: lerobot_real::pika_teleop
+      id: right_pika
+      port: /dev/REPLACE_RIGHT_PIKA
+      # Both sides share one libsurvive context and must select distinct trackers.
+      tracker_device_id: REPLACE_RIGHT_TRACKER_LHR
+      # Pika 命令状态后台轮询频率(Hz)，不等于 dataset.fps。
+      frequency: 100
+      # true 输出夹爪动作；scale_xyz 只缩放平移增量，不缩放旋转。
+      use_gripper: true
+      scale_xyz: 1.0
+      # 旧版字段；当前 PikaTeleop 实际读取 tracker_to_robot_eef，而不读取本字段。
+      robot_control_to_pika_tcp: [0, 0, 190, 0, -90, 0]
+      # Pika 输出位姿的初始参考 [xyz(mm), rpy(deg)]；mock 模式不会据此移动真机。
+      robot_base_pose: [300, -150, 250, 180, 0, 0]
+
+dataset:
+  # root/repo_id 决定保存位置与标识；dataset.fps 是该直接采集模式的录制帧率。
+  root: ./data/dual_pika_direct
+  repo_id: local/dual_pika_direct
+  single_task: REPLACE_TASK_DESCRIPTION
+  fps: 30
+  episode_time_s: 60
+  reset_time_s: 20
+  num_episodes: 50
+  push_to_hub: false

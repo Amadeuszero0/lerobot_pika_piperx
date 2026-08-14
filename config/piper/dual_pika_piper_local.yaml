@@ -1,0 +1,108 @@
+# Site preflight profile: two Pika controllers -> two Piper follower arms.
+# Hardware mapping was previously verified on this host:
+#   left:  /dev/pika_left,  LHR-818D4A5D, can_left
+#   right: /dev/pika_right, LHR-52C31F65, can_right
+# Cameras are intentionally disabled until arm direction and workspace checks pass.
+fps: 50
+
+robot:
+  type: lerobot_real::dual_piper
+  id: dual_piper
+  parallel_connect: true
+  parallel_observation: true
+  parallel_action: true
+  robots:
+    left:
+      type: lerobot_real::piper
+      id: left_piper
+      port: can_left
+      control_space: cartesian
+      configure_role_on_connect: false
+      park_on_connect: false
+      park_on_disconnect: false
+      disable_torque_on_disconnect: false
+      hold_position_on_disconnect: true
+      feedback_timeout_s: 1.0
+      feedback_startup_timeout_s: 5.0
+      cartesian_command_mode: official_ik
+      ik_urdf_path: /home/star/piper_runtime/agx_arm_description/agx_arm_urdf/piper_x/urdf/piper_x_description.urdf
+      ik_package_dir: /home/star/piper_runtime
+      max_cartesian_step_mm: 6.0
+      max_rotation_step_rad: 0.025
+      max_cartesian_following_error_mm: 150.0
+      max_rotation_following_error_rad: 0.5
+      workspace_x: [50.0, 600.0]
+      workspace_y: [-500.0, 500.0]
+      workspace_z: [50.0, 600.0]
+      move_mode: move_p
+      move_speed_percent: 40
+      gripper_effort: 1000
+      cameras: {}
+    right:
+      type: lerobot_real::piper
+      id: right_piper
+      port: can_right
+      control_space: cartesian
+      configure_role_on_connect: false
+      park_on_connect: false
+      park_on_disconnect: false
+      disable_torque_on_disconnect: false
+      hold_position_on_disconnect: true
+      feedback_timeout_s: 1.0
+      feedback_startup_timeout_s: 5.0
+      cartesian_command_mode: official_ik
+      ik_urdf_path: /home/star/piper_runtime/agx_arm_description/agx_arm_urdf/piper_x/urdf/piper_x_description.urdf
+      ik_package_dir: /home/star/piper_runtime
+      max_cartesian_step_mm: 6.0
+      max_rotation_step_rad: 0.025
+      max_cartesian_following_error_mm: 150.0
+      max_rotation_following_error_rad: 0.5
+      workspace_x: [50.0, 600.0]
+      workspace_y: [-500.0, 500.0]
+      workspace_z: [50.0, 600.0]
+      move_mode: move_p
+      move_speed_percent: 40
+      gripper_effort: 1000
+      cameras: {}
+
+teleop:
+  type: lerobot_real::dual_pika_teleop
+  id: dual_pika
+  parallel_read: true
+  teleops:
+    left:
+      type: lerobot_real::pika_teleop
+      id: left_pika
+      port: /dev/pika_left
+      tracker_device_id: LHR-818D4A5D
+      frequency: 50
+      use_gripper: true
+      scale_xyz: 1.0
+      activation_mode: gripper_gesture
+      control_frame: official
+      tracker_world_to_robot_base_rpy: [0, 0, 0]
+      tracker_to_robot_eef: [-190, 0, 0, -90, 0, -90]
+      robot_base_pose: [157.157, -2.686, 286.813, -124.111, -4.526, -87.919]
+    right:
+      type: lerobot_real::pika_teleop
+      id: right_pika
+      port: /dev/pika_right
+      tracker_device_id: LHR-52C31F65
+      frequency: 50
+      use_gripper: true
+      scale_xyz: 1.0
+      activation_mode: gripper_gesture
+      control_frame: official
+      tracker_world_to_robot_base_rpy: [0, 0, 0]
+      tracker_to_robot_eef: [-190, 0, 0, -90, 0, -90]
+      robot_base_pose: [161.640, 1.509, 284.606, -116.318, -3.253, -86.640]
+
+dataset:
+  root: /home/star/lerobot_data/dual_pika_piper
+  repo_id: local/dual_pika_piper
+  single_task: Bimanual Pika to Piper teleoperation
+  fps: 30
+  episode_time_s: 30
+  reset_time_s: 20
+  num_episodes: 50
+  push_to_hub: false

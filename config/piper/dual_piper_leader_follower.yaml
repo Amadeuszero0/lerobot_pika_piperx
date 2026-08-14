@@ -1,0 +1,112 @@
+# 方案三：两台 Piper leader 分别遥操两台 Piper follower（双臂主从）。
+# 需要四路不同的 CAN 口；动作空间为归一化关节位置。
+robot:
+  type: lerobot_real::dual_piper
+  id: dual_piper
+  # true 使用线程并行连接两侧设备；false 可用于按侧排查连接问题。
+  parallel_connect: true
+  # 双臂反馈和相机读取并行执行，降低串行读取带来的周期延迟。
+  parallel_observation: true
+  # 左右臂动作并行下发；两侧故障仍会向上抛出并终止当前调用。
+  parallel_action: true
+  # left/right 是动作和观测键前缀；两台机械臂的 CAN 接口必须互不相同。
+  robots:
+    left:
+      # follower: type 为驱动类型，id 为逻辑标识，port 为该侧独立 SocketCAN 接口。
+      # configure_role_on_connect=true 会设 follower(0xFC)；park 会引发实际运动。
+      type: lerobot_real::piper
+      id: left_follower
+      port: can_follower1
+      # joint1..6=[-100, 100]、gripper=[0, 100]；使用 JointCtrl，不支持 EEF 输入。
+      # 当前 YAML 不提供 0xAD/MIT 开关。
+      control_space: joint
+      configure_role_on_connect: true
+      park_on_connect: false
+      park_on_disconnect: false
+      disable_torque_on_disconnect: true
+      # feedback_timeout_s 是反馈最大允许陈旧时间；startup 是首次反馈等待总时限。
+      feedback_timeout_s: 0.5
+      feedback_startup_timeout_s: 5.0
+      # 单周期关节目标变化上限，单位为归一化值；设为 null 会关闭限幅。
+      max_relative_target: 0.5
+      # SDK 速度百分比 [1, 100]，不是循环频率；双臂首次联调建议低速逐臂确认。
+      move_speed_percent: 5
+      # wrist 会形成 left.wrist/right.wrist 观测；相机路径必须分别替换。
+      cameras:
+        wrist:
+          type: opencv
+          index_or_path: /dev/v4l/by-id/REPLACE_LEFT_CAMERA
+          width: 640
+          height: 480
+          fps: 30
+          fourcc: MJPG
+    right:
+      # follower: type 为驱动类型，id 为逻辑标识，port 为该侧独立 SocketCAN 接口。
+      # configure_role_on_connect=true 会设 follower(0xFC)；park 会引发实际运动。
+      type: lerobot_real::piper
+      id: right_follower
+      port: can_follower2
+      # joint1..6=[-100, 100]、gripper=[0, 100]；使用 JointCtrl，不支持 EEF 输入。
+      # 当前 YAML 不提供 0xAD/MIT 开关。
+      control_space: joint
+      configure_role_on_connect: true
+      park_on_connect: false
+      park_on_disconnect: false
+      disable_torque_on_disconnect: true
+      # feedback_timeout_s 是反馈最大允许陈旧时间；startup 是首次反馈等待总时限。
+      feedback_timeout_s: 0.5
+      feedback_startup_timeout_s: 5.0
+      # 单周期关节目标变化上限，单位为归一化值；设为 null 会关闭限幅。
+      max_relative_target: 0.5
+      # SDK 速度百分比 [1, 100]，不是循环频率；双臂首次联调建议低速逐臂确认。
+      move_speed_percent: 5
+      # wrist 会形成 left.wrist/right.wrist 观测；相机路径必须分别替换。
+      cameras:
+        wrist:
+          type: opencv
+          index_or_path: /dev/v4l/by-id/REPLACE_RIGHT_CAMERA
+          width: 640
+          height: 480
+          fps: 30
+          fourcc: MJPG
+
+teleop:
+  type: lerobot_real::dual_piper_leader
+  id: dual_piper_leader
+  # true 使用线程并行连接两侧设备；false 可用于按侧排查连接问题。
+  parallel_connect: true
+  # true 并行读取两台 leader，减少左右采样时间差。
+  parallel_read: true
+  # left/right 必须与 robot 子项同名，才能生成一致的动作键前缀。
+  teleops:
+    left:
+      # leader 使用独立 CAN；连接时设为示教输入臂(0xFA)，不会按 follower 使能。
+      type: lerobot_real::piper_leader
+      id: left_leader
+      port: can_leader1
+      configure_role_on_connect: true
+      disable_torque_on_disconnect: true
+      # feedback_timeout_s 是反馈最大允许陈旧时间；startup 是首次反馈等待总时限。
+      feedback_timeout_s: 0.5
+      feedback_startup_timeout_s: 5.0
+    right:
+      # leader 使用独立 CAN；连接时设为示教输入臂(0xFA)，不会按 follower 使能。
+      type: lerobot_real::piper_leader
+      id: right_leader
+      port: can_leader2
+      configure_role_on_connect: true
+      disable_torque_on_disconnect: true
+      # feedback_timeout_s 是反馈最大允许陈旧时间；startup 是首次反馈等待总时限。
+      feedback_timeout_s: 0.5
+      feedback_startup_timeout_s: 5.0
+
+dataset:
+  # root/repo_id 决定保存位置与标识；dataset.fps 是录制帧率，不是机械臂速度。
+  root: ./data/dual_piper_leader_follower
+  repo_id: local/dual_piper_leader_follower
+  single_task: REPLACE_TASK_DESCRIPTION
+  fps: 30
+  episode_time_s: 60
+  reset_time_s: 20
+  num_episodes: 50
+  push_to_hub: false
