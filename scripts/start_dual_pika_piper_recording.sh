@@ -11,6 +11,8 @@ session_name="dual_pika_piper"
 task_description="Bimanual Pika to Piper teleoperation"
 num_episodes=50
 episode_time_s=30
+episode_mode="timed"
+interactive_reset=true
 reset_time_s=20
 move_speed_percent=40
 dataset_base="/home/star/lerobot_data"
@@ -27,7 +29,12 @@ Options:
   --task TEXT               LeRobot task description
   --episodes N              Number of episodes (default: 50); with --resume,
                             this is the desired total including saved episodes
-  --episode-seconds N       Duration of each episode (default: 30)
+  --episode-seconds N       Maximum duration of each episode (default: 30)
+  --timed-episodes          Use the official-style maximum duration (default)
+  --manual-episodes         Disable the B-recording time limit
+  --interactive-reset       Teleoperate without recording to restore the A-end
+                            state before every episode (default)
+  --no-interactive-reset    Skip PREP and enter B recording directly
   --reset-seconds N         Reset interval in config (default: 20)
   --speed N                 Piper speed percentage, 1-100 (default: 40)
   --dataset-base PATH       Parent data directory (default: /home/star/lerobot_data)
@@ -39,10 +46,16 @@ Options:
 Every episode moves both Pipers to their configured startup poses, then waits
 for a close-open-close gesture from both Pika grippers before teleoperation.
 
-Headless terminal controls:
-  Recording: Enter finishes early; r+Enter discards/re-records; q+Enter
-             discards the current episode and stops safely.
-  Review:    s saves; r discards/re-records; q discards and stops safely.
+Headless terminal workflow:
+  Preparation: Enter starts B recording; q+Enter quits. No data is written.
+  B recording: Enter or s+Enter finishes early; r+Enter discards and returns
+               to preparation; q+Enter discards and quits.
+  Review:      s saves; r discards and returns to preparation; q discards/quits.
+  Timed mode:  reaching --episode-seconds opens the same review prompt.
+  After save:  Enter starts the next unrecorded preparation phase; q stops.
+
+Saving is synchronous, matching LeRobot: the next-episode prompt appears only
+after the current episode's Parquet, video, and metadata files are saved.
 
 Resume example (continue the dataset until it contains 50 saved episodes):
   bash scripts/collect_dual_pika_piper_dataset.sh \
@@ -69,6 +82,14 @@ while [[ "$#" -gt 0 ]]; do
             require_value "$@"; num_episodes="$2"; shift 2 ;;
         --episode-seconds)
             require_value "$@"; episode_time_s="$2"; shift 2 ;;
+        --manual-episodes)
+            episode_mode="manual"; shift ;;
+        --timed-episodes)
+            episode_mode="timed"; shift ;;
+        --interactive-reset)
+            interactive_reset=true; shift ;;
+        --no-interactive-reset)
+            interactive_reset=false; shift ;;
         --reset-seconds)
             require_value "$@"; reset_time_s="$2"; shift 2 ;;
         --speed)
@@ -211,13 +232,15 @@ Task:               ${task_description}
 Target episodes:    ${num_episodes}
 Already saved:      ${saved_episodes}
 Episodes this run:  ${episodes_this_run}
-Episode duration:   ${episode_time_s} s
+Episode mode:       ${episode_mode}
+Episode duration:   $([[ "${episode_mode}" == "manual" ]] && echo "manual (no time limit)" || echo "maximum ${episode_time_s} s")
+Between-episode A-end restoration: ${interactive_reset}
 Piper speed:        ${move_speed_percent}%
 Startup motion:     enabled
 Camera streams:     left.third_view, left.wrist, right.wrist
 Joint observations: left/right joint1..joint6.angle_rad
-Terminal controls:  Enter=finish current episode, r+Enter=discard/re-record,
-                    q+Enter=discard current episode and stop safely
+Terminal controls:  prep Enter=start B; record Enter=finish/review;
+                    review s=save, r=discard/re-prepare, q=discard/quit
 
 Both Pipers will move before each episode. Clear both workspaces and prepare E-stop.
 EOF
@@ -233,6 +256,12 @@ if [[ "${confirmation}" != "${required_confirmation}" ]]; then
 fi
 
 record_args=(--config_path "${RECORD_CONFIG}")
+if [[ "${episode_mode}" == "manual" ]]; then
+    record_args=(--manual-episode-control "${record_args[@]}")
+fi
+if [[ "${interactive_reset}" == "true" ]]; then
+    record_args=(--interactive-episode-reset "${record_args[@]}")
+fi
 if [[ "${run_mode}" == "RESUME" ]]; then
     record_args=(--resume "${record_args[@]}")
 fi

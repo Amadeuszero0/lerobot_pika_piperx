@@ -132,19 +132,23 @@ def _discard_current_episode(dataset, async_episode_saver=None):
     _set_episode_buffer(dataset, empty_episode_buffer)
 
 
-def _parse_headless_record_command(line):
+def _parse_headless_record_command(line, allow_blank_finish=False):
     command = line.strip().lower()
-    if command in {"", "s", "save", "finish"}:
+    if command in {"s", "save", "finish"} or (
+        allow_blank_finish and command == ""
+    ):
         return "finish"
     if command in {"r", "retry", "rerecord"}:
         return "rerecord"
     if command in {"q", "quit", "exit"}:
         return "quit"
-    print("Unknown recording command. Use Enter, r+Enter, or q+Enter.")
+    print(
+        "Unknown recording command. Use Enter/s+Enter, r+Enter, or q+Enter."
+    )
     return None
 
 
-def _poll_headless_record_command(stream=None):
+def _poll_headless_record_command(stream=None, allow_blank_finish=False):
     """Read one line-buffered terminal command without delaying the control loop."""
     import select
 
@@ -159,7 +163,55 @@ def _poll_headless_record_command(stream=None):
     line = stream.readline()
     if line == "":
         return "quit"
-    return _parse_headless_record_command(line)
+    return _parse_headless_record_command(
+        line, allow_blank_finish=allow_blank_finish
+    )
+
+
+def _teleop_is_enabled(teleop):
+    child_teleops = getattr(teleop, "teleops", None)
+    if isinstance(child_teleops, dict) and child_teleops:
+        return all(
+            bool(getattr(child, "is_teleop_enabled", True))
+            for child in child_teleops.values()
+        )
+    return bool(getattr(teleop, "is_teleop_enabled", True))
+
+
+def _parse_headless_prepare_command(line, teleop_ready=True):
+    command = line.strip().lower()
+    if command in {"", "s", "start"}:
+        if teleop_ready:
+            return "finish"
+        print(
+            "Pika teleoperation is not active yet. Complete both activation "
+            "gestures, restore the A-end state, then press Enter again."
+        )
+        return None
+    if command in {"q", "quit", "exit"}:
+        return "quit"
+    print("Unknown preparation command. Press Enter to record, or q+Enter to quit.")
+    return None
+
+
+def _poll_headless_prepare_command(teleop, stream=None):
+    """Poll commands during the unrecorded A-end-state restoration phase."""
+    import select
+
+    stream = sys.stdin if stream is None else stream
+    try:
+        readable, _, _ = select.select([stream], [], [], 0)
+    except (OSError, TypeError, ValueError):
+        return None
+    if not readable:
+        return None
+
+    line = stream.readline()
+    if line == "":
+        return "quit"
+    return _parse_headless_prepare_command(
+        line, teleop_ready=_teleop_is_enabled(teleop)
+    )
 
 
 def _apply_record_command(events, command):
@@ -173,22 +225,6 @@ def _apply_record_command(events, command):
         events["exit_early"] = True
 
 
-def _prompt_headless_episode_decision(input_fn=None):
-    input_fn = input if input_fn is None else input_fn
-    while True:
-        command = input_fn(
-            "Episode finished: [s] save  [r] discard and rerecord  "
-            "[q] discard and quit >>> "
-        ).strip().lower()
-        if command in {"s", "save"}:
-            return "save"
-        if command in {"r", "retry", "rerecord"}:
-            return "rerecord"
-        if command in {"q", "quit", "exit"}:
-            return "quit"
-        print("Please enter s, r, or q.")
-
-
 def _prompt_headless_next_episode(input_fn=None):
     input_fn = input if input_fn is None else input_fn
     while True:
@@ -200,6 +236,22 @@ def _prompt_headless_next_episode(input_fn=None):
         if command in {"q", "quit", "exit"}:
             return "quit"
         print("Press Enter to continue, or enter q to stop.")
+
+
+def _prompt_headless_episode_decision(input_fn=None):
+    input_fn = input if input_fn is None else input_fn
+    while True:
+        command = input_fn(
+            "Episode finished: [s] save  [r] discard and restore A-end state "
+            "again  [q] discard and quit >>> "
+        ).strip().lower()
+        if command in {"s", "save"}:
+            return "save"
+        if command in {"r", "retry", "rerecord"}:
+            return "rerecord"
+        if command in {"q", "quit", "exit"}:
+            return "quit"
+        print("Please enter s, r, or q.")
 
 
 class AsyncEpisodeSaver:
@@ -298,7 +350,7 @@ def record_loop(
     policy: PreTrainedPolicy | None = None,
     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]] | None = None,
     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction] | None = None,
-    control_time_s: int | None = None,
+    control_time_s: int | float | None = None,
     single_task: str | None = None,
     display_data: bool = False,
     display_compressed_images: bool = False,
@@ -345,7 +397,7 @@ def record_loop(
 
     timestamp = 0
     start_episode_t = time.perf_counter()
-    while timestamp < control_time_s:
+    while control_time_s is None or timestamp < control_time_s:
         start_loop_t = time.perf_counter()
 
         if command_poller is not None:
@@ -449,6 +501,8 @@ def record_loop(
 def _record_impl(
     cfg: RecordConfig,
     async_save: bool,
+    manual_episode_control: bool,
+    interactive_episode_reset: bool,
     cleanup_devices: list,
 ) -> LeRobotDataset:
     init_logging()
@@ -580,10 +634,33 @@ def _record_impl(
         print("\n********** Episode Record Loop Start **********")
         print('⌨   [ESC] Exit  [Space] Start  [←] Reset  [→] Save')
     else:
-        input('⌨   Press Enter to start record >>> ')
+        initial_prompt = (
+            '⌨   Press Enter to start A-end-state preparation >>> '
+            if interactive_episode_reset
+            else '⌨   Press Enter to start record >>> '
+        )
+        input(initial_prompt)
         is_recorded = True
         print('\n********** Episode Record Loop Start **********')
-        print('During recording: [Enter] finish  [r+Enter] discard/re-record  [q+Enter] discard/quit')
+        if interactive_episode_reset:
+            print(
+                'Preparation (not recorded): [Enter] start B recording  '
+                '[q+Enter] discard/quit'
+            )
+            print(
+                'B recording: [Enter or s+Enter] finish/review  '
+                '[r+Enter] discard/re-prepare  [q+Enter] discard/quit'
+            )
+        elif manual_episode_control:
+            print(
+                'During recording: [Enter or s+Enter] finish/review  '
+                '[r+Enter] discard/re-record  [q+Enter] discard/quit'
+            )
+        else:
+            print(
+                'During recording: [Enter or s+Enter] finish/review  '
+                '[r+Enter] discard/re-record  [q+Enter] discard/quit'
+            )
 
     frame_callback = None
     async_episode_saver = AsyncEpisodeSaver(dataset) if async_save else None
@@ -618,25 +695,88 @@ def _record_impl(
                     move_robot_to_teleop_base(robot, teleop)
                     obs = robot.get_observation()
                     teleop.set_teleop_enabled(True, obs)
-                log_say(f"Recording episode {_current_episode_index(dataset)}", cfg.play_sounds)
-                record_loop(
-                    robot=robot,
-                    events=events,
-                    fps=cfg.dataset.fps,
-                    teleop_action_processor=teleop_action_processor,
-                    robot_action_processor=robot_action_processor,
-                    robot_observation_processor=robot_observation_processor,
-                    teleop=teleop,
-                    policy=policy,
-                    preprocessor=preprocessor,
-                    postprocessor=postprocessor,
-                    dataset=dataset,
-                    control_time_s=cfg.dataset.episode_time_s,
-                    single_task=cfg.dataset.single_task,
-                    display_data=cfg.display_data,
-                    frame_callback=frame_callback,
-                    command_poller=None if is_evt else _poll_headless_record_command,
-                )
+
+                if interactive_episode_reset and teleop is not None:
+                    episode_index = _current_episode_index(dataset)
+                    log_say(
+                        f"Restore A-end state for episode {episode_index}",
+                        cfg.play_sounds,
+                    )
+                    if is_evt:
+                        print(
+                            '⌨   PREP (not recorded): restore the A-end state, '
+                            'then press [→]. [ESC] quits.'
+                        )
+                    else:
+                        print(
+                            f'\n===== PREP episode {episode_index} (NOT RECORDED) ====='
+                        )
+                        print(
+                            'Complete both Pika activation gestures, restore the '
+                            'A-end action/pose and scene, then press Enter to record B.'
+                        )
+                        print('Enter=start B recording  q+Enter=discard/quit')
+                    record_loop(
+                        robot=robot,
+                        events=events,
+                        fps=cfg.dataset.fps,
+                        teleop_action_processor=teleop_action_processor,
+                        robot_action_processor=robot_action_processor,
+                        robot_observation_processor=robot_observation_processor,
+                        teleop=teleop,
+                        dataset=None,
+                        control_time_s=None,
+                        single_task=cfg.dataset.single_task,
+                        display_data=cfg.display_data,
+                        command_poller=(
+                            None
+                            if is_evt
+                            else lambda: _poll_headless_prepare_command(teleop)
+                        ),
+                    )
+
+                if not events["stop_recording"]:
+                    episode_index = _current_episode_index(dataset)
+                    log_say(f"Recording episode {episode_index}", cfg.play_sounds)
+                    if not is_evt:
+                        duration_text = (
+                            "no time limit"
+                            if manual_episode_control
+                            else f"maximum {cfg.dataset.episode_time_s} s"
+                        )
+                        print(f'\n===== RECORD B episode {episode_index} ({duration_text}) =====')
+                        print(
+                            'Enter or s+Enter=finish/review  '
+                            'r+Enter=discard/re-prepare  q+Enter=discard/quit'
+                        )
+                    record_loop(
+                        robot=robot,
+                        events=events,
+                        fps=cfg.dataset.fps,
+                        teleop_action_processor=teleop_action_processor,
+                        robot_action_processor=robot_action_processor,
+                        robot_observation_processor=robot_observation_processor,
+                        teleop=teleop,
+                        policy=policy,
+                        preprocessor=preprocessor,
+                        postprocessor=postprocessor,
+                        dataset=dataset,
+                        control_time_s=(
+                            None
+                            if manual_episode_control
+                            else cfg.dataset.episode_time_s
+                        ),
+                        single_task=cfg.dataset.single_task,
+                        display_data=cfg.display_data,
+                        frame_callback=frame_callback,
+                        command_poller=(
+                            None
+                            if is_evt
+                            else lambda: _poll_headless_record_command(
+                                allow_blank_finish=True
+                            )
+                        ),
+                    )
             else:
                 continue
 
@@ -658,7 +798,10 @@ def _record_impl(
                     print('⌨   [ESC] Exit  [Space] Start  [←] Reset  [→] Save')
                 else:
                     is_recorded = True
-                    print("Current episode discarded; preparing the same episode again.")
+                    print(
+                        "Current episode discarded; restoring the A-end state "
+                        "before recording the same episode again."
+                    )
                 continue
 
             if is_recorded and not events['stop_recording']:
@@ -668,12 +811,18 @@ def _record_impl(
                         _discard_current_episode(dataset, async_episode_saver)
                         events["exit_early"] = False
                         is_recorded = True
-                        print("Current episode discarded; preparing the same episode again.")
+                        print(
+                            "Current episode discarded; restoring the A-end state "
+                            "before recording the same episode again."
+                        )
                         continue
                     if decision == "quit":
                         _discard_current_episode(dataset, async_episode_saver)
                         events["stop_recording"] = True
-                        print("Current episode discarded. Previously saved episodes are kept.")
+                        print(
+                            "Current episode discarded. Previously saved episodes "
+                            "are kept."
+                        )
                         break
 
                 episode_index = _current_episode_index(dataset)
@@ -718,10 +867,21 @@ def _record_impl(
     return dataset
 
 
-def record(cfg: RecordConfig, async_save: bool = False) -> LeRobotDataset:
+def record(
+    cfg: RecordConfig,
+    async_save: bool = False,
+    manual_episode_control: bool = False,
+    interactive_episode_reset: bool = False,
+) -> LeRobotDataset:
     cleanup_devices: list = []
     try:
-        dataset = _record_impl(cfg, async_save, cleanup_devices)
+        dataset = _record_impl(
+            cfg,
+            async_save,
+            manual_episode_control,
+            interactive_episode_reset,
+            cleanup_devices,
+        )
     except BaseException:
         disconnect_devices(cleanup_devices, suppress_errors=True)
         raise
@@ -742,6 +902,20 @@ def main():
                        action='store_true',
                        default=False,
                        help='Enable async background saving (default: False)')
+    parser.add_argument('--manual-episode-control', '--manual_episode_control',
+                       action='store_true',
+                       default=False,
+                       help=(
+                           'Record until Enter/s/r/q is entered instead of using '
+                           'the configured episode timeout'
+                       ))
+    parser.add_argument('--interactive-episode-reset', '--interactive_episode_reset',
+                       action='store_true',
+                       default=False,
+                       help=(
+                           'Before each episode, teleoperate without recording '
+                           'until the user confirms the A-end state'
+                       ))
     parser.add_argument('--check-config-only',
                        action='store_true',
                        default=False,
@@ -756,7 +930,12 @@ def main():
     if args.resume:
         cfg.resume = True
     cfg.play_sounds = False
-    record(cfg, async_save=args.async_save)
+    record(
+        cfg,
+        async_save=args.async_save,
+        manual_episode_control=args.manual_episode_control,
+        interactive_episode_reset=args.interactive_episode_reset,
+    )
 
 
 if __name__ == "__main__":

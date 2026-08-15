@@ -77,7 +77,14 @@ def test_disconnect_devices_attempts_every_cleanup() -> None:
 
 
 def test_headless_record_commands_update_only_recording_events() -> None:
-    assert lerobot_record._parse_headless_record_command("\n") == "finish"
+    assert lerobot_record._parse_headless_record_command("s\n") == "finish"
+    assert lerobot_record._parse_headless_record_command("\n") is None
+    assert (
+        lerobot_record._parse_headless_record_command(
+            "\n", allow_blank_finish=True
+        )
+        == "finish"
+    )
     assert lerobot_record._parse_headless_record_command("R\n") == "rerecord"
     assert lerobot_record._parse_headless_record_command("quit\n") == "quit"
 
@@ -104,12 +111,102 @@ def test_headless_record_commands_update_only_recording_events() -> None:
     assert events["stop_recording"] is True
 
 
-def test_headless_episode_decision_requires_explicit_valid_choice() -> None:
+def test_headless_prepare_command_requires_active_teleoperation() -> None:
+    assert (
+        lerobot_record._parse_headless_prepare_command(
+            "\n", teleop_ready=False
+        )
+        is None
+    )
+    assert (
+        lerobot_record._parse_headless_prepare_command(
+            "\n", teleop_ready=True
+        )
+        == "finish"
+    )
+    assert (
+        lerobot_record._parse_headless_prepare_command(
+            "q\n", teleop_ready=False
+        )
+        == "quit"
+    )
+
+
+def test_headless_episode_review_requires_explicit_choice() -> None:
     answers = iter(["", "invalid", "r"])
 
     assert lerobot_record._prompt_headless_episode_decision(
         lambda prompt: next(answers)
     ) == "rerecord"
+
+
+def test_record_loop_supports_manual_episode_duration(monkeypatch) -> None:
+    events = {
+        "exit_early": False,
+        "rerecord_episode": False,
+        "stop_recording": False,
+    }
+
+    class FakeRobot:
+        def get_observation(self):
+            return {"joint.pos": 0.0}
+
+    monkeypatch.setattr(lerobot_record, "precise_sleep", lambda duration: None)
+
+    lerobot_record.record_loop(
+        robot=FakeRobot(),
+        events=events,
+        fps=30,
+        teleop_action_processor=lambda value: value[0],
+        robot_action_processor=lambda value: value[0],
+        robot_observation_processor=lambda value: value,
+        control_time_s=None,
+        command_poller=lambda: "finish",
+    )
+
+    assert events["exit_early"] is False
+
+
+def test_prepare_loop_can_teleoperate_without_a_dataset(monkeypatch) -> None:
+    events = {
+        "exit_early": False,
+        "rerecord_episode": False,
+        "stop_recording": False,
+    }
+    sent_actions: list[dict] = []
+    commands = iter([None, "finish"])
+
+    class FakeTeleoperator:
+        def get_action(self):
+            return {"joint.pos": 1.0}
+
+    class FakeRobot:
+        name = "fake"
+
+        def get_observation(self):
+            return {"joint.pos": 0.0}
+
+        def send_action(self, action):
+            sent_actions.append(dict(action))
+            return action
+
+    monkeypatch.setattr(lerobot_record, "Teleoperator", FakeTeleoperator)
+    monkeypatch.setattr(lerobot_record, "precise_sleep", lambda duration: None)
+
+    lerobot_record.record_loop(
+        robot=FakeRobot(),
+        events=events,
+        fps=30,
+        teleop_action_processor=lambda value: value[0],
+        robot_action_processor=lambda value: value[0],
+        robot_observation_processor=lambda value: value,
+        dataset=None,
+        teleop=FakeTeleoperator(),
+        control_time_s=None,
+        command_poller=lambda: next(commands),
+    )
+
+    assert sent_actions == [{"joint.pos": 1.0}]
 
 
 def test_discard_current_episode_keeps_episode_index() -> None:
