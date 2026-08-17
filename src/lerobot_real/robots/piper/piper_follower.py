@@ -11,6 +11,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from functools import cached_property
 from typing import Any, TypeVar
 
+import numpy as np
+
 from lerobot.cameras import Camera
 from lerobot.cameras.utils import make_cameras_from_configs
 from lerobot.robots import Robot
@@ -39,6 +41,53 @@ T = TypeVar("T")
 JOINT_KEYS = tuple(f"joint{i}.pos" for i in range(1, 7)) + ("gripper.pos",)
 JOINT_ANGLE_KEYS = tuple(f"joint{i}.angle_rad" for i in range(1, 7))
 POSE_KEYS = ("pose.x", "pose.y", "pose.z", "pose.rx", "pose.ry", "pose.rz")
+DUAL_ARM_SIDES = ("left", "right")
+DUAL_JOINT_STATE_NAMES = tuple(
+    name
+    for side in DUAL_ARM_SIDES
+    for name in (
+        *(f"{side}.joint{i}.angle_rad" for i in range(1, 7)),
+        f"{side}.gripper.pos",
+    )
+)
+DUAL_ENDPOSE_NAMES = tuple(
+    f"{side}.{key}" for side in DUAL_ARM_SIDES for key in POSE_KEYS
+)
+DUAL_RECORDING_FEATURES = {
+    "observation.state": {
+        "dtype": "float32",
+        "shape": (len(DUAL_JOINT_STATE_NAMES),),
+        "names": list(DUAL_JOINT_STATE_NAMES),
+    },
+    "observation.state.endpose": {
+        "dtype": "float32",
+        "shape": (len(DUAL_ENDPOSE_NAMES),),
+        "names": list(DUAL_ENDPOSE_NAMES),
+    },
+    "action": {
+        "dtype": "float32",
+        "shape": (len(DUAL_JOINT_STATE_NAMES),),
+        "names": list(DUAL_JOINT_STATE_NAMES),
+    },
+    "action.endpose": {
+        "dtype": "float32",
+        "shape": (len(DUAL_ENDPOSE_NAMES),),
+        "names": list(DUAL_ENDPOSE_NAMES),
+    },
+}
+
+
+def _finite_float32_vector(
+    values: list[Any] | tuple[Any, ...], *, feature_name: str, expected_size: int
+) -> np.ndarray:
+    vector = np.asarray(values, dtype=np.float32)
+    if vector.shape != (expected_size,):
+        raise RuntimeError(
+            f"{feature_name} has shape {vector.shape}, expected {(expected_size,)}"
+        )
+    if not np.isfinite(vector).all():
+        raise RuntimeError(f"{feature_name} contains NaN or infinity")
+    return vector
 
 
 class PiperFollower(Robot):
@@ -335,6 +384,25 @@ class PiperFollower(Robot):
         else:
             self._mark_feedback_recovered()
         return {self._key(key): value for key, value in sent.items()}
+
+    def get_last_sent_joint_command(self) -> tuple[float, ...]:
+        """Return the final joint target accepted by the official IK send path."""
+        if (
+            self.config.control_space != "cartesian"
+            or self.config.cartesian_command_mode != "official_ik"
+        ):
+            raise RuntimeError(
+                f"Piper {self.id} does not use the cartesian official_ik command path"
+            )
+        if self._last_ik_joint_command is None:
+            raise RuntimeError(
+                f"Piper {self.id} has no valid sent joint target to record; "
+                "the IK command was not accepted"
+            )
+        joints = tuple(float(value) for value in self._last_ik_joint_command)
+        if len(joints) != 6 or not all(math.isfinite(value) for value in joints):
+            raise RuntimeError(f"Piper {self.id} returned an invalid sent joint target")
+        return joints
 
     def _strip_and_validate(self, action: dict[str, Any]) -> dict[str, float]:
         local: dict[str, float] = {}
@@ -730,6 +798,87 @@ class DualPiperFollower(Robot):
         for sent in sent_actions:
             merged.update(sent)
         return merged
+
+    def _uses_joint_eef_recording_schema(self) -> bool:
+        if set(self.robots) != set(DUAL_ARM_SIDES):
+            return False
+        return all(
+            getattr(robot.config, "record_joint_angles", False)
+            and robot.config.control_space == "cartesian"
+            and robot.config.cartesian_command_mode == "official_ik"
+            for robot in self.robots.values()
+        )
+
+    def customize_dataset_features(self, dataset_features: dict[str, dict]) -> dict[str, dict]:
+        """Split joint and EEF vectors without changing the teleoperation control API."""
+        if not self._uses_joint_eef_recording_schema():
+            return dataset_features
+
+        visual_features = {
+            name: feature
+            for name, feature in dataset_features.items()
+            if name.startswith("observation.images.")
+        }
+        return {
+            **{name: dict(feature) for name, feature in DUAL_RECORDING_FEATURES.items()},
+            **visual_features,
+        }
+
+    def build_dataset_observation_frame(
+        self, observation: dict[str, Any], dataset_features: dict[str, dict]
+    ) -> dict[str, Any] | None:
+        if not self._uses_joint_eef_recording_schema():
+            return None
+
+        state = _finite_float32_vector(
+            [observation[name] for name in DUAL_JOINT_STATE_NAMES],
+            feature_name="observation.state",
+            expected_size=len(DUAL_JOINT_STATE_NAMES),
+        )
+        endpose = _finite_float32_vector(
+            [observation[name] for name in DUAL_ENDPOSE_NAMES],
+            feature_name="observation.state.endpose",
+            expected_size=len(DUAL_ENDPOSE_NAMES),
+        )
+        frame: dict[str, Any] = {
+            "observation.state": state,
+            "observation.state.endpose": endpose,
+        }
+        image_prefix = "observation.images."
+        for feature_name in dataset_features:
+            if not feature_name.startswith(image_prefix):
+                continue
+            raw_name = feature_name.removeprefix(image_prefix)
+            if raw_name not in observation:
+                raise KeyError(
+                    f"Observation is missing camera {raw_name!r} required by {feature_name!r}"
+                )
+            frame[feature_name] = observation[raw_name]
+        return frame
+
+    def build_dataset_action_frame(
+        self, sent_action: dict[str, Any], dataset_features: dict[str, dict]
+    ) -> dict[str, Any] | None:
+        if not self._uses_joint_eef_recording_schema():
+            return None
+
+        joint_action: list[float] = []
+        for side in DUAL_ARM_SIDES:
+            joint_action.extend(self.robots[side].get_last_sent_joint_command())
+            joint_action.append(float(sent_action[f"{side}.gripper.pos"]))
+
+        return {
+            "action": _finite_float32_vector(
+                joint_action,
+                feature_name="action",
+                expected_size=len(DUAL_JOINT_STATE_NAMES),
+            ),
+            "action.endpose": _finite_float32_vector(
+                [sent_action[name] for name in DUAL_ENDPOSE_NAMES],
+                feature_name="action.endpose",
+                expected_size=len(DUAL_ENDPOSE_NAMES),
+            ),
+        }
 
     def disconnect(self) -> None:
         try:

@@ -54,6 +54,68 @@ def test_record_loop_persists_action_returned_by_robot(monkeypatch) -> None:
     assert (lerobot_record.ACTION, {"joint.pos": 100.0}) not in built_frames
 
 
+def test_record_loop_uses_robot_specific_dataset_frame_builders(monkeypatch) -> None:
+    events = {"exit_early": False}
+    saved_frames: list[dict] = []
+
+    class FakeTeleoperator:
+        def get_action(self):
+            return {"pose.x": 100.0}
+
+    class FakeRobot:
+        name = "fake"
+        robot_type = "fake"
+
+        def get_observation(self):
+            return {"feedback": 1.0}
+
+        def send_action(self, action):
+            return {"effective_target": 2.0}
+
+        def build_dataset_observation_frame(self, observation, features):
+            return {"observation.custom": [observation["feedback"]]}
+
+        def build_dataset_action_frame(self, sent_action, features):
+            return {"action.custom": [sent_action["effective_target"]]}
+
+    class FakeDataset:
+        fps = 30
+        features = {}
+
+        def add_frame(self, frame):
+            saved_frames.append(frame)
+            events["exit_early"] = True
+
+    monkeypatch.setattr(lerobot_record, "Teleoperator", FakeTeleoperator)
+    monkeypatch.setattr(
+        lerobot_record,
+        "build_dataset_frame",
+        lambda *args, **kwargs: pytest.fail("standard frame builder must not be used"),
+    )
+    monkeypatch.setattr(lerobot_record, "precise_sleep", lambda duration: None)
+
+    lerobot_record.record_loop(
+        robot=FakeRobot(),
+        events=events,
+        fps=30,
+        teleop_action_processor=lambda value: value[0],
+        robot_action_processor=lambda value: value[0],
+        robot_observation_processor=lambda value: value,
+        dataset=FakeDataset(),
+        teleop=FakeTeleoperator(),
+        control_time_s=1,
+        single_task="test",
+    )
+
+    assert saved_frames == [
+        {
+            "observation.custom": [1.0],
+            "action.custom": [2.0],
+            "task": "test",
+        }
+    ]
+
+
 def test_disconnect_devices_attempts_every_cleanup() -> None:
     calls: list[str] = []
 

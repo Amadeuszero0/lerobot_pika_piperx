@@ -19,6 +19,31 @@ from lerobot_real.scripts._device_cleanup import disconnect_devices
 from lerobot_real.scripts._teleop_setup import move_robot_to_teleop_base
 
 
+def _customize_dataset_features(robot, dataset_features):
+    customize = getattr(robot, "customize_dataset_features", None)
+    if customize is None:
+        return dataset_features
+    return customize(dataset_features)
+
+
+def _build_observation_frame(robot, dataset_features, observation):
+    build = getattr(robot, "build_dataset_observation_frame", None)
+    if build is not None:
+        frame = build(observation, dataset_features)
+        if frame is not None:
+            return frame
+    return build_dataset_frame(dataset_features, observation, prefix=OBS_STR)
+
+
+def _build_action_frame(robot, dataset_features, sent_action):
+    build = getattr(robot, "build_dataset_action_frame", None)
+    if build is not None:
+        frame = build(sent_action, dataset_features)
+        if frame is not None:
+            return frame
+    return build_dataset_frame(dataset_features, sent_action, prefix=ACTION)
+
+
 def _get_dataset_writer(dataset):
     return getattr(dataset, "writer", None)
 
@@ -417,7 +442,9 @@ def record_loop(
         obs_processed = robot_observation_processor(obs)
 
         if policy is not None or dataset is not None:
-            observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix=OBS_STR)
+            observation_frame = _build_observation_frame(
+                robot, dataset.features, obs_processed
+            )
 
         # Get action from either policy or teleop
         if policy is not None and preprocessor is not None and postprocessor is not None:
@@ -479,7 +506,7 @@ def record_loop(
 
         # Write to dataset
         if dataset is not None:
-            action_frame = build_dataset_frame(dataset.features, sent_action, prefix=ACTION)
+            action_frame = _build_action_frame(robot, dataset.features, sent_action)
             frame = {**observation_frame, **action_frame, "task": single_task}
             if frame_callback is not None:
                 frame = frame_callback(frame)
@@ -532,6 +559,7 @@ def _record_impl(
             use_videos=cfg.dataset.video,
         ),
     )
+    dataset_features = _customize_dataset_features(robot, dataset_features)
 
     if cfg.resume:
         dataset = LeRobotDataset(

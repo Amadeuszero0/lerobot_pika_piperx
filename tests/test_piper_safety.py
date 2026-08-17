@@ -1,6 +1,7 @@
 import time
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import lerobot_real.robots.piper.piper_follower as piper_follower_module
@@ -10,9 +11,13 @@ from lerobot_real.devices.piper.piper_motors_bus import (
     PiperFeedbackStaleError,
 )
 from lerobot_real.robots.piper.piper_follower import (
+    DUAL_ENDPOSE_NAMES,
+    DUAL_JOINT_STATE_NAMES,
+    DUAL_RECORDING_FEATURES,
     JOINT_ANGLE_KEYS,
     JOINT_KEYS,
     POSE_KEYS,
+    DualPiperFollower,
     PiperFollower,
 )
 from lerobot_real.teleoperators.piper_leader.piper_leader import PiperLeader
@@ -473,6 +478,107 @@ def test_cartesian_observation_can_include_physical_joint_angles_without_changin
     assert observation["pose.x"] == pytest.approx(300.0)
     assert observation["gripper.pos"] == pytest.approx(0.25)
     assert set(follower.action_features) == {*POSE_KEYS, "gripper.pos"}
+
+
+def make_dual_recording_robot() -> DualPiperFollower:
+    dual = object.__new__(DualPiperFollower)
+    dual.robots = {}
+    for side, offset in (("left", 0.0), ("right", 10.0)):
+        robot = SimpleNamespace(
+            config=SimpleNamespace(
+                record_joint_angles=True,
+                control_space="cartesian",
+                cartesian_command_mode="official_ik",
+            ),
+            get_last_sent_joint_command=lambda offset=offset: tuple(
+                offset + index / 10 for index in range(1, 7)
+            ),
+        )
+        dual.robots[side] = robot
+    return dual
+
+
+def test_dual_recording_schema_splits_joint_and_endpose_features() -> None:
+    dual = make_dual_recording_robot()
+    source_features = {
+        "observation.state": {"dtype": "float32", "shape": (26,)},
+        "action": {"dtype": "float32", "shape": (14,)},
+        "observation.images.left.wrist": {
+            "dtype": "video",
+            "shape": (480, 640, 3),
+        },
+    }
+
+    features = dual.customize_dataset_features(source_features)
+
+    assert set(features) == {
+        *DUAL_RECORDING_FEATURES,
+        "observation.images.left.wrist",
+    }
+    assert features["observation.state"]["shape"] == (14,)
+    assert features["observation.state"]["names"] == list(DUAL_JOINT_STATE_NAMES)
+    assert features["observation.state.endpose"]["shape"] == (12,)
+    assert features["action"]["names"] == list(DUAL_JOINT_STATE_NAMES)
+    assert features["action.endpose"]["names"] == list(DUAL_ENDPOSE_NAMES)
+
+
+def test_dual_recording_frames_use_feedback_and_actual_sent_joint_targets() -> None:
+    dual = make_dual_recording_robot()
+    image = np.zeros((2, 3, 3), dtype=np.uint8)
+    features = dual.customize_dataset_features(
+        {
+            "observation.state": {},
+            "action": {},
+            "observation.images.left.wrist": {
+                "dtype": "video",
+                "shape": image.shape,
+            },
+        }
+    )
+    observation = {
+        **{name: index + 0.25 for index, name in enumerate(DUAL_JOINT_STATE_NAMES)},
+        **{name: index + 100.5 for index, name in enumerate(DUAL_ENDPOSE_NAMES)},
+        "left.wrist": image,
+    }
+    sent_action = {
+        **{name: index + 200.5 for index, name in enumerate(DUAL_ENDPOSE_NAMES)},
+        "left.gripper.pos": 0.3,
+        "right.gripper.pos": 0.7,
+    }
+
+    observation_frame = dual.build_dataset_observation_frame(observation, features)
+    action_frame = dual.build_dataset_action_frame(sent_action, features)
+
+    assert observation_frame is not None
+    assert action_frame is not None
+    np.testing.assert_allclose(
+        observation_frame["observation.state"],
+        [index + 0.25 for index in range(14)],
+    )
+    np.testing.assert_allclose(
+        observation_frame["observation.state.endpose"],
+        [index + 100.5 for index in range(12)],
+    )
+    assert observation_frame["observation.images.left.wrist"] is image
+    np.testing.assert_allclose(
+        action_frame["action"],
+        [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.3, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 0.7],
+    )
+    np.testing.assert_allclose(
+        action_frame["action.endpose"],
+        [index + 200.5 for index in range(12)],
+    )
+    assert observation_frame["observation.state"].dtype == np.float32
+    assert action_frame["action"].dtype == np.float32
+
+
+def test_recording_rejects_missing_actual_sent_joint_target() -> None:
+    bus = MovingFakeCartesianBus((300.0, 0.0, 250.0, 0.0, 0.0, 0.0))
+    follower = make_cartesian_follower(bus)
+    follower.config.cartesian_command_mode = "official_ik"
+
+    with pytest.raises(RuntimeError, match="no valid sent joint target"):
+        follower.get_last_sent_joint_command()
 
 
 def test_cartesian_control_rejects_derived_non_finite_pose_before_sending(
