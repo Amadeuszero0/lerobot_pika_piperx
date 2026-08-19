@@ -17,6 +17,7 @@ from lerobot_real.teleoperators.utils import make_teleoperator_from_config
 from lerobot_real.utils.utils import init_keyboard_listener
 from lerobot_real.scripts._device_cleanup import disconnect_devices
 from lerobot_real.scripts._teleop_setup import move_robot_to_teleop_base
+from lerobot_real.utils.dataset_hardware import ensure_hardware_metadata
 
 
 def _customize_dataset_features(robot, dataset_features):
@@ -24,6 +25,16 @@ def _customize_dataset_features(robot, dataset_features):
     if customize is None:
         return dataset_features
     return customize(dataset_features)
+
+
+def _ensure_dataset_hardware_metadata(robot, dataset, dataset_root):
+    describe = getattr(robot, "dataset_hardware_metadata", None)
+    metadata = None if describe is None else describe()
+    ensure_hardware_metadata(
+        Path(dataset_root),
+        metadata,
+        existing_episodes=int(dataset.num_episodes),
+    )
 
 
 def _build_observation_frame(robot, dataset_features, observation):
@@ -567,6 +578,7 @@ def _record_impl(
             root=cfg.dataset.root,
             batch_encoding_size=cfg.dataset.video_encoding_batch_size,
         )
+        _ensure_dataset_hardware_metadata(robot, dataset, cfg.dataset.root)
 
         print(
             f"Resuming dataset with {dataset.num_episodes} saved episode(s); "
@@ -593,6 +605,7 @@ def _record_impl(
             image_writer_threads=cfg.dataset.num_image_writer_threads_per_camera * len(robot.cameras),
             batch_encoding_size=cfg.dataset.video_encoding_batch_size,
         )
+        _ensure_dataset_hardware_metadata(robot, dataset, cfg.dataset.root)
 
     # Load pretrained policy
     policy = None if cfg.policy is None else make_policy(cfg.policy, ds_meta=dataset.meta)

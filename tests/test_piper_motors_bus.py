@@ -208,6 +208,16 @@ def test_fixed_joint_ranges_match_piper_sdk_limits() -> None:
     assert actual == expected
 
 
+def test_large_gripper_calibration_uses_configured_width() -> None:
+    tables = importlib.import_module("lerobot_real.devices.piper.tables")
+
+    calibration = tables.make_calibration(0.098)
+
+    assert calibration["gripper"].range_min == 0
+    assert calibration["gripper"].range_max == 98000
+    assert tables.CALIBRATION["gripper"].range_max == 68000
+
+
 def test_feedback_validation_rejects_missing_and_stale_frames(bus) -> None:
     with pytest.raises(RuntimeError, match="no valid joint state timestamp"):
         bus._validate_feedback(SimpleNamespace(Hz=0, time_stamp=0), "joint state")

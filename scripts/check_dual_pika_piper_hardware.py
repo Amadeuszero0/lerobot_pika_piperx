@@ -51,6 +51,24 @@ def _wait_for_piper_feedback(bus: PiperMotorsBus) -> tuple[Any, Any, tuple[float
     raise TimeoutError(f"No fresh feedback from {bus.id} on {bus.port}") from last_error
 
 
+def _read_gripper_max_range_mm(bus: PiperMotorsBus) -> int | None:
+    """Query firmware jaw type when supported; this never sends a motion command."""
+    query = getattr(bus.piper, "ArmParamEnquiryAndConfig", None)
+    read = getattr(bus.piper, "GetGripperTeachingPendantParamFeedback", None)
+    if query is None or read is None:
+        return None
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        query(param_enquiry=0x04)
+        time.sleep(0.1)
+        message = read()
+        feedback = message.arm_gripper_teaching_param_feedback
+        value = int(feedback.max_range_config)
+        if value in (70, 100):
+            return value
+    raise TimeoutError(f"No valid gripper range feedback from {bus.id} on {bus.port}")
+
+
 def _read_pipers(config: dict[str, Any]) -> dict[str, Any]:
     buses: dict[str, PiperMotorsBus] = {}
     try:
@@ -69,6 +87,20 @@ def _read_pipers(config: dict[str, Any]) -> dict[str, Any]:
         results: dict[str, Any] = {}
         for side, bus in buses.items():
             status, motors, end_pose = _wait_for_piper_feedback(bus)
+            firmware_gripper_max_mm = _read_gripper_max_range_mm(bus)
+            configured_gripper_max_mm = round(
+                float(config["robot"]["robots"][side].get("gripper_max_width_m", 0.068))
+                * 1000.0,
+                3,
+            )
+            if (
+                firmware_gripper_max_mm is not None
+                and configured_gripper_max_mm > firmware_gripper_max_mm
+            ):
+                raise RuntimeError(
+                    f"{side} configured gripper range {configured_gripper_max_mm} mm "
+                    f"exceeds firmware jaw range {firmware_gripper_max_mm} mm"
+                )
             enabled = [
                 bool(
                     getattr(motors, f"motor_{joint_index}")
@@ -81,6 +113,8 @@ def _read_pipers(config: dict[str, Any]) -> dict[str, Any]:
                 "arm_status": int(status.arm_status),
                 "error_code": int(status.err_code),
                 "motors_enabled": enabled,
+                "configured_gripper_max_mm": configured_gripper_max_mm,
+                "firmware_gripper_max_mm": firmware_gripper_max_mm,
                 "end_pose_xyz_mm_rpy_deg": [
                     round(value, 3) for value in end_pose
                 ],

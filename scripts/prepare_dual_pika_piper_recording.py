@@ -453,6 +453,17 @@ def main() -> int:
                         side: robot.get("move_speed_percent")
                         for side, robot in record_config["robot"]["robots"].items()
                     },
+                    "gripper_max_width_m": {
+                        side: robot.get("gripper_max_width_m", 0.068)
+                        for side, robot in record_config["robot"]["robots"].items()
+                    },
+                    "pika_gripper_input_mm": {
+                        side: [
+                            teleop.get("gripper_input_min_mm", 0.0),
+                            teleop.get("gripper_input_max_mm", 100.0),
+                        ]
+                        for side, teleop in record_config["teleop"]["teleops"].items()
+                    },
                     "automatic_startup_motion": any(
                         teleop.get("move_to_base_on_start", True)
                         for teleop in record_config["teleop"]["teleops"].values()

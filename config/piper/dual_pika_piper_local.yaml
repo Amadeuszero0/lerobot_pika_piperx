@@ -37,6 +37,8 @@ robot:
       move_mode: move_p
       move_speed_percent: 40
       gripper_effort: 1000
+      # Both site Pipers report max_range_config=100 (large jaw). Keep 2 mm margin.
+      gripper_max_width_m: 0.098
       cameras: {}
     right:
       type: lerobot_real::piper
@@ -63,6 +65,8 @@ robot:
       move_mode: move_p
       move_speed_percent: 40
       gripper_effort: 1000
+      # Both site Pipers report max_range_config=100 (large jaw). Keep 2 mm margin.
+      gripper_max_width_m: 0.098
       cameras: {}
 
 teleop:
@@ -79,6 +83,9 @@ teleop:
       use_gripper: true
       scale_xyz: 1.0
       activation_mode: gripper_gesture
+      # The measured Pika endpoint is about 98 mm; map it to gripper.pos=1.0.
+      gripper_input_min_mm: 0.0
+      gripper_input_max_mm: 98.0
       control_frame: official
       tracker_world_to_robot_base_rpy: [0, 0, 0]
       tracker_to_robot_eef: [-190, 0, 0, -90, 0, -90]
@@ -92,6 +99,9 @@ teleop:
       use_gripper: true
       scale_xyz: 1.0
       activation_mode: gripper_gesture
+      # The measured Pika endpoint is about 98 mm; map it to gripper.pos=1.0.
+      gripper_input_min_mm: 0.0
+      gripper_input_max_mm: 98.0
       control_frame: official
       tracker_world_to_robot_base_rpy: [0, 0, 0]
       tracker_to_robot_eef: [-190, 0, 0, -90, 0, -90]

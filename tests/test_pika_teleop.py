@@ -43,6 +43,8 @@ def make_teleop(
         activation_mode=activation_mode,
         activation_close_threshold_mm=15.0,
         activation_open_threshold_mm=70.0,
+        gripper_input_min_mm=0.0,
+        gripper_input_max_mm=100.0,
         control_frame="official",
         tracker_world_to_robot_base_rpy=(0.0, 0.0, 0.0),
     )
@@ -96,6 +98,29 @@ def test_gripper_distance_maps_closed_to_zero_and_open_to_one() -> None:
     action = teleop.get_action()
 
     assert action["gripper.pos"] == pytest.approx(0.8)
+
+
+def test_gripper_distance_uses_calibrated_input_endpoints() -> None:
+    teleop = make_teleop(FakePikaSense(gripper_sample=98.0))
+    teleop.config.gripper_input_min_mm = 2.0
+    teleop.config.gripper_input_max_mm = 98.0
+
+    assert teleop.get_action()["gripper.pos"] == pytest.approx(1.0)
+
+    teleop.pika_sense.gripper_sample = 2.0
+    assert teleop.get_action()["gripper.pos"] == pytest.approx(0.0)
+
+    teleop.pika_sense.gripper_sample = 50.0
+    assert teleop.get_action()["gripper.pos"] == pytest.approx(0.5)
+
+
+def test_pika_config_rejects_invalid_gripper_input_endpoints() -> None:
+    with pytest.raises(ValueError, match="gripper input endpoints"):
+        PikaTeleopConfig(
+            port="/dev/pika-test",
+            gripper_input_min_mm=98.0,
+            gripper_input_max_mm=98.0,
+        )
 
 
 def test_button_state_change_during_sensor_read_discards_stale_sample() -> None:

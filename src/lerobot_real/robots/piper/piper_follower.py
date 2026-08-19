@@ -33,7 +33,11 @@ from lerobot_real.devices.piper.pose import (
     rpy_degrees_to_axis_angle,
     vector_step_towards,
 )
-from lerobot_real.devices.piper.tables import CALIBRATION, MOTORS
+from lerobot_real.devices.piper.tables import (
+    DEFAULT_GRIPPER_MAX_WIDTH_M,
+    MOTORS,
+    make_calibration,
+)
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -102,7 +106,7 @@ class PiperFollower(Robot):
             id=config.id or prefix or "piper",
             port=config.port,
             motors=MOTORS.copy(),
-            calibration=CALIBRATION.copy(),
+            calibration=make_calibration(config.gripper_max_width_m),
             feedback_timeout_s=config.feedback_timeout_s,
         )
         self.cameras: dict[str, Camera] = make_cameras_from_configs(config.cameras)
@@ -120,6 +124,17 @@ class PiperFollower(Robot):
             self._camera_executor = ThreadPoolExecutor(
                 max_workers=len(self.cameras), thread_name_prefix=f"{prefix or 'piper'}-camera"
             )
+
+    @property
+    def gripper_max_width_m(self) -> float:
+        """Physical opening represented by a normalized gripper command of 1.0."""
+        return float(
+            getattr(
+                self.config,
+                "gripper_max_width_m",
+                DEFAULT_GRIPPER_MAX_WIDTH_M,
+            )
+        )
 
     def _create_official_ik_worker(self) -> Any:
         from lerobot_real.devices.piper.official_kinematics import OfficialPiperIKWorker
@@ -535,7 +550,7 @@ class PiperFollower(Robot):
             update = update_target(
                 target_pose,
                 current_joints,
-                gripper_width_m=gripper_unit * 0.068,
+                gripper_width_m=gripper_unit * self.gripper_max_width_m,
             )
             if update is None:
                 return self._stream_last_ik_command(
@@ -549,7 +564,7 @@ class PiperFollower(Robot):
             result = self._official_ik.solve_native_pose(
                 target_pose,
                 current_joints,
-                gripper_width_m=gripper_unit * 0.068,
+                gripper_width_m=gripper_unit * self.gripper_max_width_m,
             )
         if result is None:
             if not self._ik_over_limit:
@@ -582,7 +597,7 @@ class PiperFollower(Robot):
                     for previous, target in zip(reference, result.joints_rad, strict=True)
                 )
                 sent_state = self.bus.set_joint_state(
-                    (*interpolated, gripper_unit * 0.068),
+                    (*interpolated, gripper_unit * self.gripper_max_width_m),
                     speed_percent=self.config.move_speed_percent,
                     gripper_effort=self.config.gripper_effort,
                 )
@@ -591,7 +606,7 @@ class PiperFollower(Robot):
                     time.sleep(1.0 / 200.0)
         else:
             sent_state = self.bus.set_joint_state(
-                (*result.joints_rad, gripper_unit * 0.068),
+                (*result.joints_rad, gripper_unit * self.gripper_max_width_m),
                 speed_percent=self.config.move_speed_percent,
                 gripper_effort=self.config.gripper_effort,
             )
@@ -611,7 +626,7 @@ class PiperFollower(Robot):
     ) -> dict[str, float]:
         if self._last_ik_joint_command is not None:
             sent_state = self.bus.set_joint_state(
-                (*self._last_ik_joint_command, gripper_unit * 0.068),
+                (*self._last_ik_joint_command, gripper_unit * self.gripper_max_width_m),
                 speed_percent=self.config.move_speed_percent,
                 gripper_effort=self.config.gripper_effort,
             )
@@ -822,6 +837,19 @@ class DualPiperFollower(Robot):
         return {
             **{name: dict(feature) for name, feature in DUAL_RECORDING_FEATURES.items()},
             **visual_features,
+        }
+
+    def dataset_hardware_metadata(self) -> dict[str, Any]:
+        """Describe normalized gripper semantics for recording and replay."""
+        return {
+            "schema_version": 1,
+            "gripper": {
+                "normalized_range": [0.0, 1.0],
+                "max_width_m_by_side": {
+                    side: robot.gripper_max_width_m
+                    for side, robot in self.robots.items()
+                },
+            },
         }
 
     def build_dataset_observation_frame(

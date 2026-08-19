@@ -61,6 +61,7 @@ dataset_root/
 │   │       ├── file-000.parquet
 │   │       └── ...
 │   ├── info.json
+│   ├── robot_hardware.json
 │   ├── stats.json
 │   └── tasks.parquet
 ├── videos/
@@ -131,7 +132,9 @@ dataset_root/
 13  right.gripper.pos
 ```
 
-关节角单位为 rad，来源是 PiperX 反馈；夹爪是归一化反馈，约 `0～1`。不要只依赖数字下标，应读取：
+关节角单位为 rad，来源是 PiperX 反馈；夹爪是归一化反馈，约 `0～1`。现场新数据
+使用98 mm有效行程，物理换算必须读取 `meta/robot_hardware.json`，不要把没有该文件的
+旧版68 mm数据当作98 mm。不要只依赖数字下标，应读取：
 
 ```python
 info["features"]["observation.state"]["names"]
@@ -331,6 +334,24 @@ info["features"]["action"]
 ### 9.4 `meta/tasks.parquet`
 
 保存任务文本及其 `task_index`。当前通常是单任务数据集，但训练代码仍应通过 `task_index` 读取，不要假定它永远为 0。
+
+### 9.5 `meta/robot_hardware.json`
+
+这是本项目额外保存的物理控制语义，记录左右夹爪的 `max_width_m_by_side` 以及
+`gripper.pos` 的归一化范围。现场100 mm大夹爪保留2 mm安全余量，因此新数据通常为：
+
+```json
+{
+  "schema_version": 1,
+  "gripper": {
+    "normalized_range": [0.0, 1.0],
+    "max_width_m_by_side": {"left": 0.098, "right": 0.098}
+  }
+}
+```
+
+没有该文件的数据由工具按旧版68 mm语义解释。恢复采集时，如果现有数据没有该文件而
+当前配置为98 mm，程序会拒绝续采，以免同一数据集中出现两种不同的夹爪物理含义。
 
 ## 10. 推荐：使用 LeRobotDataset 加载
 

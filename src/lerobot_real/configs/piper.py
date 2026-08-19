@@ -53,6 +53,10 @@ class PiperFollowerConfig(RobotConfig):
     move_mode: str = "move_p"
     move_speed_percent: int = 5
     gripper_effort: int = 1000
+    # Physical opening represented by gripper.pos=1.0. The generic default is
+    # safe for the 70 mm small jaw; use 0.098 for a 100 mm large jaw while
+    # retaining 2 mm of endpoint margin.
+    gripper_max_width_m: float = 0.068
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -106,6 +110,11 @@ class PiperFollowerConfig(RobotConfig):
                 raise ValueError("max_relative_target values must be finite and positive")
         if not 0 <= self.gripper_effort <= 5000:
             raise ValueError("gripper_effort must be in [0, 5000]")
+        if (
+            not math.isfinite(self.gripper_max_width_m)
+            or not 0 < self.gripper_max_width_m <= 0.1
+        ):
+            raise ValueError("gripper_max_width_m must be in (0, 0.1]")
         if self.control_space == "cartesian" and any(
             bounds is None for bounds in (self.workspace_x, self.workspace_y, self.workspace_z)
         ):

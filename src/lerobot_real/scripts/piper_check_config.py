@@ -124,6 +124,31 @@ def check(path: Path) -> list[str]:
         hold_on_disconnect = robot_config.get("hold_position_on_disconnect", False)
         if not isinstance(hold_on_disconnect, bool):
             errors.append(f"{label}robot.hold_position_on_disconnect must be boolean")
+        gripper_max_width_m = robot_config.get("gripper_max_width_m", 0.068)
+        if (
+            not isinstance(gripper_max_width_m, (int, float))
+            or isinstance(gripper_max_width_m, bool)
+            or not math.isfinite(gripper_max_width_m)
+            or not 0 < gripper_max_width_m <= 0.1
+        ):
+            errors.append(f"{label}robot.gripper_max_width_m must be in (0, 0.1]")
+        gripper_input_min_mm = teleop_config.get("gripper_input_min_mm", 0.0)
+        gripper_input_max_mm = teleop_config.get("gripper_input_max_mm", 100.0)
+        if (
+            not isinstance(gripper_input_min_mm, (int, float))
+            or isinstance(gripper_input_min_mm, bool)
+            or not isinstance(gripper_input_max_mm, (int, float))
+            or isinstance(gripper_input_max_mm, bool)
+            or not math.isfinite(gripper_input_min_mm)
+            or not math.isfinite(gripper_input_max_mm)
+            or gripper_input_min_mm < 0
+            or gripper_input_max_mm > 100
+            or gripper_input_min_mm >= gripper_input_max_mm
+        ):
+            errors.append(
+                f"{label}teleop gripper input endpoints must satisfy "
+                "0 <= min < max <= 100 mm"
+            )
         control_frame = teleop_config.get("control_frame", "official")
         if control_frame not in {"official", "robot_base"}:
             errors.append(

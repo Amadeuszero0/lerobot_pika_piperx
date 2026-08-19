@@ -353,10 +353,15 @@ Press Enter to prepare the next episode, or q to stop >>>
 
 ```text
 data/       # 状态、动作和逐帧索引 Parquet
-meta/       # info、stats、tasks 和 episode 元数据
+meta/       # info、stats、tasks、episode 元数据和 robot_hardware.json
 videos/     # 三路相机 MP4
 images/     # 录制/编码过程中的临时图像
 ```
+
+现场左右 Piper 均为100 mm大夹爪，正式配置使用98 mm安全行程。Pika 的实测0～98 mm
+输入会归一化为 `gripper.pos=0～1`。每个新数据集的
+`meta/robot_hardware.json` 会记录左右夹爪的实际物理行程，供训练、恢复采集和回放校验。
+没有该文件的历史数据按旧版68 mm范围解释，不能直接和98 mm新数据混合。
 
 续采后可能出现：
 

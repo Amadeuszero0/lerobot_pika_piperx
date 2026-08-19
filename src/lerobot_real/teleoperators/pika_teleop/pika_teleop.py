@@ -548,7 +548,12 @@ class PikaTeleop(BaseTeleop, Thread):
                     )
 
             if distance is not None:
-                self._last_action[f"{self.prefix}gripper.pos"] = distance / 100.0
+                input_min = float(getattr(self.config, "gripper_input_min_mm", 0.0))
+                input_max = float(getattr(self.config, "gripper_input_max_mm", 100.0))
+                gripper_unit = (distance - input_min) / (input_max - input_min)
+                self._last_action[f"{self.prefix}gripper.pos"] = min(
+                    1.0, max(0.0, gripper_unit)
+                )
 
             return self._current_action_locked()
 

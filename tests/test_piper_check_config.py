@@ -188,6 +188,32 @@ dataset:
     assert check(config_path) == ["CAN/serial port names must not be reused in one configuration"]
 
 
+def test_checker_rejects_invalid_gripper_ranges(tmp_path: Path) -> None:
+    config_path = tmp_path / "bad_gripper.yaml"
+    config_path.write_text(
+        """
+robot:
+  type: lerobot_real::piper
+  port: can_follower
+  gripper_max_width_m: 0.12
+teleop:
+  type: lerobot_real::pika_teleop
+  port: /dev/pika
+  gripper_input_min_mm: 99
+  gripper_input_max_mm: 98
+dataset:
+  repo_id: local/test
+  single_task: move the object
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert check(config_path) == [
+        "robot.gripper_max_width_m must be in (0, 0.1]",
+        "teleop gripper input endpoints must satisfy 0 <= min < max <= 100 mm",
+    ]
+
+
 def test_checker_requires_persistent_distinct_dual_pika_trackers(tmp_path: Path) -> None:
     config_path = tmp_path / "dual_pika.yaml"
     config_path.write_text(

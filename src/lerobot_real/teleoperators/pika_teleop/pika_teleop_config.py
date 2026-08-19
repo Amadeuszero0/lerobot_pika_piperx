@@ -33,6 +33,10 @@ class PikaTeleopConfig(TeleoperatorConfig):
     activation_mode: str = "command"
     activation_close_threshold_mm: float = 15.0
     activation_open_threshold_mm: float = 70.0
+    # Calibrate the physical Pika endpoints into the normalized [0, 1]
+    # gripper action. Defaults preserve the original direct 0..100 mm mapping.
+    gripper_input_min_mm: float = 0.0
+    gripper_input_max_mm: float = 100.0
     # "official" applies the Pika delta in the local gripper frame. "robot_base"
     # maps the Pika tracking-world delta into the robot base frame.
     control_frame: str = "official"
@@ -77,6 +81,17 @@ class PikaTeleopConfig(TeleoperatorConfig):
             raise ValueError(
                 "Pika activation thresholds must satisfy "
                 "0 <= close_threshold_mm < open_threshold_mm <= 100"
+            )
+        if (
+            not math.isfinite(self.gripper_input_min_mm)
+            or not math.isfinite(self.gripper_input_max_mm)
+            or self.gripper_input_min_mm < 0
+            or self.gripper_input_max_mm > 100
+            or self.gripper_input_min_mm >= self.gripper_input_max_mm
+        ):
+            raise ValueError(
+                "Pika gripper input endpoints must satisfy "
+                "0 <= gripper_input_min_mm < gripper_input_max_mm <= 100"
             )
         for name in ("tracker_to_robot_eef", "robot_base_pose"):
             values = getattr(self, name)

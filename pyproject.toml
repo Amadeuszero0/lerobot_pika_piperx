@@ -43,6 +43,7 @@ lerobot-real-eval = "lerobot_real.scripts.lerobot_eval:main"
 lerobot-real-vive-calibrate = "lerobot_real.scripts.vive_calibrate:main"
 lerobot-real-camera-view = "lerobot_real.scripts.camera_view:main"
 lerobot-real-piper-check-config = "lerobot_real.scripts.piper_check_config:main"
+lerobot-real-replay-dual-piper = "lerobot_real.scripts.replay_dual_piper_dataset:main"
 lerobot-real-policy-server = "lerobot_real.deployment.server_policy:main"
 lerobot-real-deploy-piper = "lerobot_real.deployment.client_piper:main"
 
