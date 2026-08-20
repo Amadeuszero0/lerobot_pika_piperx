@@ -442,6 +442,30 @@ FAIL: bound D435i cameras are not connected: 346122070530
 
 再准备下一轮，不要在编码过程中强制关闭进程。
 
+### Resume 提示缺少 `meta/episodes`
+
+这通常表示上次进程在 LeRobot v3 将缓存的 episode 元数据和 Parquet footer
+写回磁盘之前被终止。先运行只读检查：
+
+```bash
+python scripts/repair_lerobot_dataset.py \
+    /home/star/lerobot_data/数据集目录
+```
+
+脚本会分别核对数据 Parquet 和每路 MP4，只保留从 episode 0 开始、数据和所有
+相机视频均完整的连续前缀。确认计划后再执行：
+
+```bash
+python scripts/repair_lerobot_dataset.py \
+    /home/star/lerobot_data/数据集目录 \
+    --apply
+```
+
+修改前的元数据及被裁剪的尾部文件会备份到数据集内的
+`.repair_backup_时间戳/`。修复成功后再用正式命令的 `--resume` 继续采集。
+不要手动创建一个空的 `meta/episodes` 目录；空目录无法恢复 episode 索引、视频
+时间范围和统计字段。
+
 ### 摇操突然持续抖动
 
 先丢弃当前 episode，并用纯摇操模式复现：

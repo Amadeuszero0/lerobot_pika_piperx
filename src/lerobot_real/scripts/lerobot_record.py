@@ -365,7 +365,39 @@ class AsyncEpisodeSaver:
     def _raise_if_failed(self):
         if self._exception is not None:
             raise RuntimeError("Async episode save failed.") from self._exception
-    
+
+
+class DatasetFinalizationManager:
+    """Flush buffered LeRobot v3 metadata and Parquet footers on every exit."""
+
+    def __init__(self, dataset):
+        self.dataset = dataset
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # LeRobot v3 buffers meta/episodes rows and Parquet footers. Without
+        # this call an interrupted or ordinary local-only run may leave
+        # info.json ahead of the episode metadata on disk.
+        self.dataset.finalize()
+        return False
+
+
+class AsyncEpisodeSaverManager:
+    """Drain the async queue before video finalization and dataset finalization."""
+
+    def __init__(self, async_episode_saver=None):
+        self.async_episode_saver = async_episode_saver
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.async_episode_saver is not None:
+            print("Waiting for pending async episode saves.")
+            self.async_episode_saver.close()
+        return False
 
 @safe_stop_image_writer
 def record_loop(
@@ -708,7 +740,11 @@ def _record_impl(
     if async_episode_saver is not None:
         print('Async episode saving is enabled.')
 
-    with VideoEncodingManager(dataset):
+    with (
+        DatasetFinalizationManager(dataset),
+        VideoEncodingManager(dataset),
+        AsyncEpisodeSaverManager(async_episode_saver),
+    ):
         recorded_episodes = 0
         while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
             time.sleep(0.01)
@@ -887,10 +923,6 @@ def _record_impl(
                         events["stop_recording"] = True
                         continue
                     is_recorded = True
-
-        if async_episode_saver is not None:
-            print('Waiting for pending async episode saves.')
-            async_episode_saver.close()
 
     print("\n********** Episode Record Loop Exit **********")
 

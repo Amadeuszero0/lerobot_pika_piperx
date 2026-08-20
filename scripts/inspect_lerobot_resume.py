@@ -88,7 +88,14 @@ def build_resume_plan(dataset_root: str | Path, target_episodes: int) -> ResumeP
         )
         for required_path in required_paths:
             if not required_path.exists():
-                raise ValueError(f"saved dataset is incomplete; missing: {required_path}")
+                hint = (
+                    " Run scripts/repair_lerobot_dataset.py on this dataset first."
+                    if required_path == root / "meta" / "episodes"
+                    else ""
+                )
+                raise ValueError(
+                    f"saved dataset is incomplete; missing: {required_path}.{hint}"
+                )
         if total_frames == 0:
             raise ValueError("dataset has saved episodes but total_frames is zero")
 

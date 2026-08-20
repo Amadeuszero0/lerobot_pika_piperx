@@ -138,6 +138,27 @@ def test_disconnect_devices_attempts_every_cleanup() -> None:
         disconnect_devices(devices, suppress_errors=False)
 
 
+def test_dataset_finalization_manager_flushes_on_exception() -> None:
+    calls: list[str] = []
+
+    class Dataset:
+        def finalize(self) -> None:
+            calls.append("finalize")
+
+    class Saver:
+        def close(self) -> None:
+            calls.append("close")
+
+    with pytest.raises(RuntimeError, match="recording failed"):
+        with (
+            lerobot_record.DatasetFinalizationManager(Dataset()),
+            lerobot_record.AsyncEpisodeSaverManager(Saver()),
+        ):
+            raise RuntimeError("recording failed")
+
+    assert calls == ["close", "finalize"]
+
+
 def test_headless_record_commands_update_only_recording_events() -> None:
     assert lerobot_record._parse_headless_record_command("s\n") == "finish"
     assert lerobot_record._parse_headless_record_command("\n") is None
